@@ -9,6 +9,9 @@
 	// Interface values
 	var selectedFleet = 1;
 	
+	// Auto Focus Overriding
+	var overrideFocus = false;
+	
 	$(document).on("ready", function(){
 		// Check localStorage
 		if(!window.localStorage){
@@ -75,7 +78,14 @@
 		// eLoS Toggle
 		$(".summary-eqlos").on("click",function(){
 			ConfigManager.scrollElosMode();
-			$(".summary-eqlos .summary_icon img").attr("src", "../../../../assets/img/stats/"+["lsc","lst","lse","ls"][ConfigManager.elosFormula]+".png");			$(".summary-eqlos .summary_text").text( Math.round(((selectedFleet < 5) ? PlayerManager.fleets[selectedFleet-1].eLoS() : PlayerManager.fleets[0].eLoS()+PlayerManager.fleets[1].eLoS()) * 100) / 100 );
+			$(".summary-eqlos .summary_icon img").attr("src", "../../../../assets/img/stats/"+["lsc","lst","lse","ls"][ConfigManager.elosFormula]+".png");
+			$(".summary-eqlos .summary_text").text( Math.round(((selectedFleet < 5) ? PlayerManager.fleets[selectedFleet-1].eLoS() : PlayerManager.fleets[0].eLoS()+PlayerManager.fleets[1].eLoS()) * 100) / 100 );
+		}).addClass("hover");
+
+		// Timer Type Toggle
+		$(".status_docking,.status_akashi").on("click",function(){
+			ConfigManager.scrollTimerType();
+			NatsuiroListeners.TimerTick();
 		}).addClass("hover");
 		
 		// Screenshot buttons
@@ -93,7 +103,7 @@
 		
 		// Switching Activity Tabs
 		$(".module.activity .activity_tab").on("click", function(){
-			if($(this).data("target")===""){ return false; }
+			// if($(this).data("target")===""){ return false; }
 			$(".module.activity .activity_tab").removeClass("active");
 			$(this).addClass("active");
 			$(".module.activity .activity_box").hide();
@@ -102,7 +112,7 @@
 		$(".module.activity .activity_tab.active").trigger("click");
 		
 		$(".module.activity .activity_dismissable").on("click", function(){
-			// $("#atab_basic").trigger("click");
+			$("#atab_basic").trigger("click");
 		});
 		
 		
@@ -165,6 +175,7 @@
 		// Update Timer UIs
 		setInterval(function(){
 			KC3TimerManager.update();
+			TimerTick();
 		}, 1000);
 		
 		// Devbuild: auto-activate dashboard while designing
@@ -276,7 +287,11 @@
 			Activate();
 			clearSortieData();
 			clearBattleData();
-			$("#atab_basic").trigger("click");
+			if(!overrideFocus){
+				$("#atab_basic").trigger("click");
+			}else{
+				overrideFocus = false;
+			}
 		},
 		
 		CatBomb: function(data){
@@ -287,20 +302,12 @@
 		},
 		
 		HQ: function(data){
-			var
-				maxHQ  = Object.keys(KC3Meta._exp).map(function(a){return parseInt(a);}).reduce(function(a,b){return a>b?a:b;}),
-				hqDt   = (PlayerManager.hq.level>=maxHQ ? 3 : ConfigManager.hqExpDetail),
-				hqt    = KC3Meta.term("HQExpAbbrev" + hqDt),
-				hqexpd = Math.abs($(".admiral_lvnext").attr("data-exp-gain"));
 			$(".admiral_name").text( PlayerManager.hq.name );
 			$(".admiral_comm").text( PlayerManager.hq.desc );
 			$(".admiral_rank").text( PlayerManager.hq.rank );
 			$(".admiral_lvval").text( PlayerManager.hq.level );
 			$(".admiral_lvbar").css({width: Math.round(PlayerManager.hq.exp[0]*58)+"px"});
-			$(".admiral_lvnext")
-				.attr("data-exp",hqt)
-				.attr("data-exp-gain",((($(".admiral_lvnext").attr("data-exp-gain")||"").length > 0) ? (KC3SortieManager.hqExpGained * (hqDt == 1 ? -1 : 1)) : ""))
-				.text( PlayerManager.hq.exp[hqDt] * (hqDt == 1 ? -1 : 1) );
+			updateHQEXPGained($(".admiral_lvnext"));
 		},
 		
 		Consumables: function(data){
@@ -503,7 +510,12 @@
 			$(".module.status .status_text").removeClass("bad");
 			
 			// STATUS: RESUPPLY
-			if( (FleetSummary.supplied || (KC3SortieManager.onSortie && KC3SortieManager.fullSupplyMode)) && (!FleetSummary.badlySupplied) ){
+			if( (FleetSummary.supplied ||
+				(KC3SortieManager.onSortie &&
+					KC3SortieManager.fullSupplyMode &&
+					(KC3SortieManager.fleetSent == (PlayerManager.combinedFleet ? 1 : selectedFleet)))) &&
+				(!FleetSummary.badlySupplied)
+			){
 				$(".module.status .status_supply .status_text").text( KC3Meta.term("PanelSupplied") );
 				$(".module.status .status_supply img").attr("src", "../../../../assets/img/ui/check.png");
 				$(".module.status .status_supply .status_text").addClass("good");
@@ -565,8 +577,7 @@
 			$(".module.status .status_support .status_text").text( FleetSummary.supportPower );
 			
 			// STATUS: REPAIRS
-			$(".module.status .status_docking .status_text").text(String(FleetSummary.docking).toHHMMSS());
-			$(".module.status .status_akashi .status_text").text(String(FleetSummary.akashi).toHHMMSS());
+			UpdateRepairTimerDisplays(FleetSummary.docking, FleetSummary.akashi);
 			$(".module.status .status_docking").attr("title", KC3Meta.term("PanelHighestDocking") );
 			$(".module.status .status_akashi").attr("title", KC3Meta.term("PanelHighestAkashi") );
 			$(".module.status .status_support").attr("title", KC3Meta.term("PanelSupportPower") );
@@ -578,7 +589,7 @@
 			
 			// Show world map and difficulty
 			$(".module.activity .map_world").text(
-				KC3SortieManager.map_world
+				(KC3SortieManager.map_world>10 ? 'E' : KC3SortieManager.map_world)
 				+"-"
 				+KC3SortieManager.map_num
 				+((KC3SortieManager.map_world>10)
@@ -863,8 +874,7 @@
 		BattleResult: function(data){
 			var thisNode = KC3SortieManager.currentNode();
 			
-			$(".admiral_lvnext")
-				.attr("data-exp-gain",KC3SortieManager.hqExpGained);
+			updateHQEXPGained($(".admiral_lvnext"),KC3SortieManager.hqExpGained);
 			
 			$(".module.activity .battle_rating img").attr("src",
 				"../../../../assets/img/client/ratings/"+thisNode.rating+".png");
@@ -1085,10 +1095,106 @@
 		
 		PvPEnd: function(data){
 			$(".module.activity .battle_rating img").attr("src", "../../../../assets/img/client/ratings/"+data.result.api_win_rank+".png");
-			$(".admiral_lvnext")
-				.attr("data-exp-gain",data.result.api_get_exp);
-		}
+			updateHQEXPGained($(".admiral_lvnext"),data.result.api_get_exp);
+		},
+		ExpedResult: function(data){
+			overrideFocus = true;
+			/* Data
+			{"api_ship_id":[-1,56,22,2,116,1,4],"api_clear_result":1,"api_get_exp":50,"api_member_lv":88,"api_member_exp":510662,"api_get_ship_exp":[210,140,140,140,140,140],"api_get_exp_lvup":[[272732,275000],[114146,117600],[89228,90300],[59817,63000],[162124,168100],[29155,30000]],"api_maparea_name":"\u5357\u65b9\u6d77\u57df","api_detail":"\u6c34\u96f7\u6226\u968a\u306b\u30c9\u30e9\u30e0\u7f36(\u8f38\u9001\u7528)\u3092\u53ef\u80fd\u306a\u9650\u308a\u6e80\u8f09\u3057\u3001\u5357\u65b9\u9f20\u8f38\u9001\u4f5c\u6226\u3092\u7d9a\u884c\u305b\u3088\uff01","api_quest_name":"\u6771\u4eac\u6025\u884c(\u5f10)","api_quest_level":8,"api_get_material":[420,0,200,0],"api_useitem_flag":[4,0],"api_get_item1":{"api_useitem_id":10,"api_useitem_name":"\u5bb6\u5177\u7bb1\uff08\u5c0f\uff09","api_useitem_count":1}}
+			
+			useitem -- 
+				00 - nothing
+				01 - instant repair
+				02 - instant construct
+				03 - development item
+				
+				10 - furniture small
+				11 - furniture medium
+				12 - furniture large
+			*/
+			
+			if(!data.response.api_clear_result && !data.response.api_get_exp) {
+				data.response.api_clear_result = -1;
+			}
+			
+			// Show result status image
+			$(".activity_expedition .expres_img img").attr("src",
+				"../../../../assets/img/client/exped_"+
+				(["fail","fail","success","gs"][data.response.api_clear_result+1])
+				+".png"
+			);
+			
+			// Expedition number
+			$(".activity_expedition .expres_num").text( KC3Meta.term("Expedition") + " " + data.expedNum );
+			
+			// Status text
+			$(".activity_expedition .expres_status")
+				.text( KC3Meta.term("MissionActivity"+(data.response.api_clear_result+1)) )
+				.removeClass("exp_status0 exp_status1 exp_status2 exp_status3")
+				.addClass("exp_status"+(data.response.api_clear_result+1));
+				
+			// Resource gains
+			if(data.response.api_get_material===-1){ data.response.api_get_material = [0,0,0,0]; }
+			$(".activity_expedition .expres_reso").each(function(i,element){
+				$(".expres_amt", element).text( data.response.api_get_material[i] );
+			});
+			
+			// Extra item get
+			var gotItem = false;
+			$(".module.activity .activity_expedition .expres_noget").hide();
+			$(".activity_expedition .expres_item").each(function(i,element){
+				var useItem = data.response["api_get_item"+(i+1)];
+				if(!!useItem && useItem.api_useitem_id > 0) {
+					gotItem = true;
+					$("img", element).attr("src", "../../../../assets/img/client/"+["bucket","ibuild","devmat","screws","","","","","","box1", "box2", "box3"][useItem.api_useitem_id]+".png");
+					$("span", element).text( useItem.api_useitem_count );
+				}else{
+					$(element).hide();
+				}
+			});
+			if(!gotItem){ $(".module.activity .activity_expedition .expres_noget").show(); }
+			
+			// HQ Exp
+			$(".activity_expedition .expres_hqexp_amt span").text( data.response.api_get_exp );
+			
+			// Ship Exp
+			$(".activity_expedition .expres_ships .expres_ship").each(function(i,element){
+				var shipId = data.response.api_ship_id[i+1];
+				if(shipId > 0) {
+					var shipData = KC3ShipManager.get(shipId);
+					$(".expres_ship_img img", element).attr("src", KC3Meta.shipIcon(shipData.masterId));
+					$(".expres_ship_exp span", element).text(data.response.api_get_ship_exp[i]);
+					$(element).show();
+				} else {
+					$(element).hide();
+				}
+			});
+			
+			// Show the box
+			$(".module.activity .activity_tab").removeClass("active");
+			$("#atab_activity").addClass("active");
+			$(".module.activity .activity_box").hide();
+			$(".module.activity .activity_expedition").fadeIn(500);
+		},
 	};
+	
+	function updateHQEXPGained(ele,newDelta) {
+		var
+			maxHQ  = Object.keys(KC3Meta._exp).map(function(a){return parseInt(a);}).reduce(function(a,b){return a>b?a:b;}),
+			hqDt = (PlayerManager.hq.level>=maxHQ ? 3 : ConfigManager.hqExpDetail),
+			hqt  = KC3Meta.term("HQExpAbbrev" + hqDt);
+		return ele
+			.attr("data-exp",hqt)
+			.attr("data-exp-gain",(function(x){
+				if(newDelta !== undefined)
+					return newDelta * (hqDt == 1 ? -1 : 1);
+				else if ((ele.attr("data-exp-gain")||"").length > 0)
+					return KC3SortieManager.hqExpGained * (hqDt == 1 ? -1 : 1);
+				else
+					return "";
+			}()))
+			.text( PlayerManager.hq.exp[hqDt] * (hqDt == 1 ? -1 : 1) );
+	}
 	
 	function CraftGearStats(MasterItem, StatProperty, Code){
 		if(parseInt(MasterItem["api_"+StatProperty], 10) !== 0){
@@ -1096,6 +1202,33 @@
 			
 			$("img", thisStatBox).attr("src", "../../../../assets/img/stats/"+Code+".png");
 			$(".equipStatText", thisStatBox).text( MasterItem["api_"+StatProperty] );
+		}
+	}
+	
+	function TimerTick(){
+		var
+			context = $(".module.status"),
+			dockElm = $(".status_docking .status_text",context),
+			koskElm = $(".status_akashi  .status_text",context);
+		UpdateRepairTimerDisplays($(dockElm).data("value"),$(koskElm).data("value"));
+	}
+	
+	function UpdateRepairTimerDisplays(docking, akashi){
+		var
+			context = $(".module.status"),
+			dockElm = $(".status_docking .status_text",context),
+			koskElm = $(".status_akashi  .status_text",context); // kousaka-kan
+		if(docking!==undefined) dockElm.data("value",docking);
+		if( akashi!==undefined) koskElm.data("value", akashi);
+		switch (ConfigManager.timerDisplayType) {
+		case 1:
+			dockElm.text(String(-dockElm.data("value")).toHHMMSS());
+			koskElm.text(String(-koskElm.data("value")).toHHMMSS());
+			break;
+		case 2:
+			dockElm.text(String(dockElm.data("value") || NaN).plusCurrentTime());
+			koskElm.text(String(koskElm.data("value") || NaN).plusCurrentTime());
+			break;
 		}
 	}
 	
